@@ -52,13 +52,16 @@ Respond ONLY with a valid JSON object matching this schema, with no markdown for
 }
 `;
 
+    const MODEL = process.env.GEMINI_MODEL || 'gemini-1.5-flash';
     let attempts = 0;
-    const maxAttempts = this.apiKeys.length * 3; // Try each key up to 3 times
+    const maxAttempts = this.apiKeys.length * 2; // Try each key up to 2 times
 
     while (attempts < maxAttempts) {
+      const keyNum = this.currentKeyIndex + 1;
+      this.emitUpdate(`Using API Key ${keyNum}/${this.apiKeys.length} (${MODEL})...`, 'info');
       try {
         const response = await this.ai.models.generateContent({
-          model: 'gemini-2.5-flash',
+          model: MODEL,
           contents: prompt,
           config: {
               responseMimeType: "application/json"
@@ -70,17 +73,19 @@ Respond ONLY with a valid JSON object matching this schema, with no markdown for
         this.emitUpdate(`Brain thought: ${parsed.reason}`, 'thought');
         return parsed;
       } catch (error) {
-        console.error("AI Error:", error);
-        
-        // Rotate key on any API error (429 Rate Limit, 400 Invalid Key, etc.)
-        this.emitUpdate(`API Error on Key ${this.currentKeyIndex + 1} (${error.status || 'unknown'}). Waiting 3s then switching...`, 'error');
-        await new Promise(resolve => setTimeout(resolve, 3000));
+        const status = error.status || error?.error?.code || 'unknown';
+        const is429 = status === 429 || String(status) === '429';
+        // Backoff: 5s for 429, 2s for other errors
+        const waitMs = is429 ? 5000 : 2000;
+        this.emitUpdate(`Key ${keyNum} error (${status}). Waiting ${waitMs/1000}s then switching...`, 'error');
+        console.error(`AI Error [Key ${keyNum}]:`, error.message || error);
+        await new Promise(resolve => setTimeout(resolve, waitMs));
         this.currentKeyIndex = (this.currentKeyIndex + 1) % this.apiKeys.length;
         attempts++;
       }
     }
     
-    this.emitUpdate(`All API keys exhausted.`, 'error');
+    this.emitUpdate(`All ${this.apiKeys.length} API keys rate-limited. Try again in a minute.`, 'error');
     return { action: "done", reason: "All API keys exhausted." };
   }
 

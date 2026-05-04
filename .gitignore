@@ -18,6 +18,5 @@ yarn-error.log*
 *.suo
 *.sln
 
-# Playwright browsers (downloaded separately)
-# Uncomment if you want to exclude downloaded browsers:
-# playwright-browsers/
+# Playwright browser binaries (downloaded at build time)
+.playwright-browsers/

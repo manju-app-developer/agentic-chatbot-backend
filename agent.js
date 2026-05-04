@@ -4,18 +4,21 @@ const { exec } = require('child_process');
 const util = require('util');
 const execPromise = util.promisify(exec);
 
+// Persists the last working key index between tasks
+let globalWorkingKeyIndex = 0;
+
 class AIAgent {
   constructor(apiKeys, emitUpdate, askHuman, askHumanStepApproval) {
     this.apiKeys = apiKeys;
-    this.currentKeyIndex = 0;
+    this.currentKeyIndex = globalWorkingKeyIndex; // start from last known good key
     this.emitUpdate = emitUpdate;
     this.askHuman = askHuman;
     this.askHumanStepApproval = askHumanStepApproval;
     this.isCancelled = false;
   }
 
-  get ai() {
-    return new GoogleGenAI({ apiKey: this.apiKeys[this.currentKeyIndex] });
+  getAI(index) {
+    return new GoogleGenAI({ apiKey: this.apiKeys[index] });
   }
 
   abort() {
@@ -53,39 +56,58 @@ Respond ONLY with a valid JSON object matching this schema, with no markdown for
 `;
 
     const MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
-    let attempts = 0;
-    const maxAttempts = this.apiKeys.length * 2; // Try each key up to 2 times
+    const n = this.apiKeys.length;
 
-    while (attempts < maxAttempts) {
-      const keyNum = this.currentKeyIndex + 1;
-      this.emitUpdate(`Using API Key ${keyNum}/${this.apiKeys.length} (${MODEL})...`, 'info');
+    // --- Pass 1: Quick scan — try every key with NO wait, starting from last known good ---
+    for (let i = 0; i < n; i++) {
+      const idx = (this.currentKeyIndex + i) % n;
+      const keyNum = idx + 1;
       try {
-        const response = await this.ai.models.generateContent({
+        this.emitUpdate(`Trying Key ${keyNum}/${n}...`, 'info');
+        const response = await this.getAI(idx).models.generateContent({
           model: MODEL,
           contents: prompt,
-          config: {
-            responseMimeType: "application/json"
-          }
+          config: { responseMimeType: "application/json" }
         });
-
-        const responseText = response.text;
-        const parsed = JSON.parse(responseText);
+        const parsed = JSON.parse(response.text);
         this.emitUpdate(`Brain thought: ${parsed.reason}`, 'thought');
+        // Save this as the new starting key for next step
+        this.currentKeyIndex = idx;
+        globalWorkingKeyIndex = idx;
         return parsed;
       } catch (error) {
         const status = error.status || error?.error?.code || 'unknown';
-        const is429 = status === 429 || String(status) === '429';
-        // Backoff: 10s for 429 rate limit, 2s for other errors
-        const waitMs = is429 ? 10000 : 2000;
-        this.emitUpdate(`Key ${keyNum} error (${status}). Waiting ${waitMs / 1000}s then switching...`, 'error');
-        console.error(`AI Error [Key ${keyNum}]:`, error.message || error);
-        await new Promise(resolve => setTimeout(resolve, waitMs));
-        this.currentKeyIndex = (this.currentKeyIndex + 1) % this.apiKeys.length;
-        attempts++;
+        this.emitUpdate(`Key ${keyNum} failed (${status}). Trying next...`, 'error');
+        console.error(`AI Error [Key ${keyNum}]:`, (error.message || '').substring(0, 100));
       }
     }
 
-    this.emitUpdate(`All ${this.apiKeys.length} API keys rate-limited. Try again in a minute.`, 'error');
+    // --- Pass 2: All keys failed — wait 10s then try one more round ---
+    this.emitUpdate(`All ${n} keys rate-limited. Waiting 10s then retrying...`, 'error');
+    await new Promise(resolve => setTimeout(resolve, 10000));
+
+    for (let i = 0; i < n; i++) {
+      const idx = (this.currentKeyIndex + i) % n;
+      const keyNum = idx + 1;
+      try {
+        this.emitUpdate(`Retry Key ${keyNum}/${n}...`, 'info');
+        const response = await this.getAI(idx).models.generateContent({
+          model: MODEL,
+          contents: prompt,
+          config: { responseMimeType: "application/json" }
+        });
+        const parsed = JSON.parse(response.text);
+        this.emitUpdate(`Brain thought: ${parsed.reason}`, 'thought');
+        this.currentKeyIndex = idx;
+        globalWorkingKeyIndex = idx;
+        return parsed;
+      } catch (error) {
+        const status = error.status || error?.error?.code || 'unknown';
+        this.emitUpdate(`Key ${keyNum} retry failed (${status}).`, 'error');
+      }
+    }
+
+    this.emitUpdate(`❌ All ${n} keys exhausted. Please wait a minute or add more API keys.`, 'error');
     return { action: "done", reason: "All API keys exhausted." };
   }
 

@@ -91,6 +91,18 @@ Respond ONLY with a valid JSON object matching this schema, with no markdown for
 
   async runLoop(browser, task, maxSteps = 15) {
     this.isCancelled = false;
+
+    // Initialize browser upfront — fail fast with a visible error if Playwright can't launch
+    try {
+      this.emitUpdate('Launching browser...', 'info');
+      await browser.ensureInit();
+      this.emitUpdate('Browser ready.', 'info');
+    } catch (initErr) {
+      this.emitUpdate(`❌ Browser failed to launch: ${initErr.message}`, 'error');
+      this.emitUpdate('Cannot proceed without a browser. Task aborted.', 'error');
+      return;
+    }
+
     let steps = 0;
     while (steps < maxSteps && !this.isCancelled) {
       if (this.isCancelled) break;
@@ -165,7 +177,7 @@ Respond ONLY with a valid JSON object matching this schema, with no markdown for
         }
       } catch (err) {
         console.error("Action error:", err);
-        this.emitUpdate(`Error executing action: ${err.message}. I will retry or rethink.`);
+        this.emitUpdate(`❌ Action failed: ${err.message}`, 'error');
       }
       
       steps++;

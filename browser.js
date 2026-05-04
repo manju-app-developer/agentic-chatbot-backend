@@ -61,8 +61,7 @@ class AgentBrowser {
   }
 
   async look() {
-    // If not initialized, return empty summary
-    if (!this.browser || !this.page) return "No browser open.";
+    await this.ensureInit();
     
     const elementsSummary = await this.page.evaluate(() => {
       let idCounter = 1;

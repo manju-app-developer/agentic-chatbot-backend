@@ -52,7 +52,7 @@ Respond ONLY with a valid JSON object matching this schema, with no markdown for
 }
 `;
 
-    const MODEL = process.env.GEMINI_MODEL || 'gemini-1.5-flash';
+    const MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
     let attempts = 0;
     const maxAttempts = this.apiKeys.length * 2; // Try each key up to 2 times
 
@@ -64,10 +64,10 @@ Respond ONLY with a valid JSON object matching this schema, with no markdown for
           model: MODEL,
           contents: prompt,
           config: {
-              responseMimeType: "application/json"
+            responseMimeType: "application/json"
           }
         });
-        
+
         const responseText = response.text;
         const parsed = JSON.parse(responseText);
         this.emitUpdate(`Brain thought: ${parsed.reason}`, 'thought');
@@ -75,16 +75,16 @@ Respond ONLY with a valid JSON object matching this schema, with no markdown for
       } catch (error) {
         const status = error.status || error?.error?.code || 'unknown';
         const is429 = status === 429 || String(status) === '429';
-        // Backoff: 5s for 429, 2s for other errors
-        const waitMs = is429 ? 5000 : 2000;
-        this.emitUpdate(`Key ${keyNum} error (${status}). Waiting ${waitMs/1000}s then switching...`, 'error');
+        // Backoff: 10s for 429 rate limit, 2s for other errors
+        const waitMs = is429 ? 10000 : 2000;
+        this.emitUpdate(`Key ${keyNum} error (${status}). Waiting ${waitMs / 1000}s then switching...`, 'error');
         console.error(`AI Error [Key ${keyNum}]:`, error.message || error);
         await new Promise(resolve => setTimeout(resolve, waitMs));
         this.currentKeyIndex = (this.currentKeyIndex + 1) % this.apiKeys.length;
         attempts++;
       }
     }
-    
+
     this.emitUpdate(`All ${this.apiKeys.length} API keys rate-limited. Try again in a minute.`, 'error');
     return { action: "done", reason: "All API keys exhausted." };
   }
@@ -119,17 +119,17 @@ Respond ONLY with a valid JSON object matching this schema, with no markdown for
 
       const screenSummary = await browser.look();
       const currentUrl = browser.page ? browser.page.url() : "No browser open.";
-      
+
       if (this.isCancelled) break;
       this.emitUpdate("Thinking about next action...", 'info');
       const instruction = await this.processStep(task, currentUrl, screenSummary);
-      
+
       if (this.isCancelled) break;
       if (instruction.action === 'done') {
         this.emitUpdate("Task marked as completed by AI.", 'info');
         break;
       }
-      
+
       try {
         if (instruction.action === 'goto') {
           this.emitUpdate(`Navigating to ${instruction.url}...`);
@@ -179,10 +179,10 @@ Respond ONLY with a valid JSON object matching this schema, with no markdown for
         console.error("Action error:", err);
         this.emitUpdate(`❌ Action failed: ${err.message}`, 'error');
       }
-      
+
       steps++;
       if (steps >= maxSteps) {
-          this.emitUpdate("Reached maximum steps limit.");
+        this.emitUpdate("Reached maximum steps limit.");
       }
     }
   }

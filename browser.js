@@ -40,8 +40,12 @@ class AgentBrowser {
       const { chromium: chromiumExtra } = require('playwright-extra');
       const stealth = require('puppeteer-extra-plugin-stealth')();
       chromiumExtra.use(stealth);
-      
-      this.browser = await chromiumExtra.launch({ headless: true });
+
+      // Run headless only on Render (RENDER env var is set automatically by Render)
+      const isHeadless = process.env.RENDER === 'true' || process.env.HEADLESS === 'true';
+      console.log(`[Browser] Launching Chromium (headless: ${isHeadless})...`);
+
+      this.browser = await chromiumExtra.launch({ headless: isHeadless });
       const context = await this.browser.newContext({
         userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36'
       });
